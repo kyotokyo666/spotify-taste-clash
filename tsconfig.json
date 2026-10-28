@@ -22,9 +22,10 @@
       "node"
     ],
     "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
     "erasableSyntaxOnly": true
   },
-  "include": [
+  "include": ["api", 
     "src",
     "server",
     "vite.config.ts"

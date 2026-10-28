@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { decodeProfile } from '../lib/codec';
-import { inviteLink } from '../lib/links';
+import { inviteLink, resolveCode } from '../lib/links';
 import { CLIENT_ID } from '../lib/spotify';
 import type { Slots } from '../lib/storage';
 import type { Profile, Slot } from '../lib/types';
@@ -15,7 +15,7 @@ interface Props {
   onError: (msg: string) => void;
 }
 
-/** Код можно вставить как целиком ссылку-приглашение, так и сам код. */
+/** Можно вставить целиком ссылку-приглашение (длинную или короткую) или сам код. */
 function extractCode(input: string): string {
   const m = input.match(/invite=([A-Za-z0-9_-]+)/);
   return m ? m[1] : input.trim();
@@ -54,7 +54,7 @@ function SlotCard({ slot, profile, ...p }: { slot: Slot; profile?: Profile } & O
 
   const submit = async () => {
     try {
-      p.onSet(slot, await decodeProfile(extractCode(code)));
+      p.onSet(slot, await decodeProfile(await resolveCode(extractCode(code))));
       setPasting(false);
       setCode('');
     } catch (e) {

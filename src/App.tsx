@@ -4,6 +4,7 @@ import { Results } from './components/Results';
 import { decodeProfile } from './lib/codec';
 import { compareProfiles } from './lib/compare';
 import { demoProfiles } from './lib/demo';
+import { resolveCode } from './lib/links';
 import { completeLogin, fetchProfile, startLogin } from './lib/spotify';
 import {
   loadMe,
@@ -46,12 +47,12 @@ async function bootstrap(): Promise<BootResult> {
     if (invite || clash) {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
       if (clash) {
-        const [ca, cb] = clash.split('.');
+        const [ca, cb] = (await resolveCode(clash)).split('.');
         const [a, b] = await Promise.all([decodeProfile(ca), decodeProfile(cb ?? '')]);
         // Результат по ссылке не затирает сохранённые слоты.
         return { slots: { a, b }, persist: false, results: true };
       }
-      const a = await decodeProfile(invite!);
+      const a = await decodeProfile(await resolveCode(invite!));
       const me = loadMe();
       result = { slots: { a, b: me }, persist: true, results: Boolean(me) };
       saveSlots(result.slots!);
