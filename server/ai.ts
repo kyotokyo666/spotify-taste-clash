@@ -8,7 +8,7 @@ import { HttpError } from './http.ts';
 import { MixRequest, MixResponse, VerdictRequest, VerdictResponse } from './schema.ts';
 import { loadReplies, loadShare, saveReply, saveShare, shareConfigured } from './share.ts';
 
-const MODEL = 'gemini-3.8-flash';
+const MODEL = 'gemini-3.5-flash-lite';
 const MAX_BODY = 64 * 1024;
 const WINDOW_MS = 10 * 60 * 1000;
 
