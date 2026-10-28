@@ -54,7 +54,7 @@ Spotify API не отдаёт число прослушиваний, поэто�
 
 ```bash
 npm install
-cp .env.example .env.local   # впишите VITE_SPOTIFY_CLIENT_ID и ANTHROPIC_API_KEY
+cp .env.example .env.local   # впишите SPOTIFY_CLIENT_ID и ANTHROPIC_API_KEY
 npm run dev                  # http://127.0.0.1:5173 — фронт и AI-эндпоинты
 ```
 
