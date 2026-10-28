@@ -152,6 +152,21 @@ code { font: 0.85em ui-monospace, 'SF Mono', Menlo, monospace; background: var(-
 .eyebrow { font-size: clamp(17px, 2vw, 21px); font-weight: 600; color: var(--b); margin-bottom: 12px; letter-spacing: -0.01em; }
 .hero h1 { font-size: clamp(48px, 9vw, 96px); letter-spacing: -0.045em; line-height: 1.04; }
 
+/* Ответы на приглашения */
+.replies { max-width: 680px; margin: 0 auto 32px; }
+.replies-list {
+  list-style: none; margin: 0; padding: 0; background: var(--surface);
+  border-radius: 18px; overflow: hidden; box-shadow: var(--shadow); animation: rise 0.6s ease both;
+}
+.replies-list li { display: flex; align-items: center; gap: 14px; padding: 12px 16px; position: relative; }
+.replies-list li + li::after { content: ''; position: absolute; top: 0; left: 74px; right: 0; border-top: 0.5px solid var(--separator); }
+.reply-text { display: grid; flex: 1; min-width: 0; font-size: 15px; text-align: left; }
+.reply-text b { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 480px) {
+  .replies-list li { flex-wrap: wrap; }
+  .replies-list .btn { flex: 1; }
+}
+
 .slots { display: grid; grid-template-columns: 1fr auto 1fr; gap: 20px; align-items: center; }
 .vs { font-size: 15px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .slot {
