@@ -1,4 +1,4 @@
-// AI-эндпоинты Taste Clash. Работают и как middleware Vite (dev), и внутри server/index.ts (prod).
+// API Taste Clash. Работает как middleware Vite (dev), внутри server/index.ts (prod) и в функциях Vercel (api/).
 // Ключ Anthropic живёт только на сервере: браузер присылает обезличенную сводку различий.
 
 import { existsSync } from 'node:fs';
@@ -8,11 +8,13 @@ import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import type { z } from 'zod';
+import { HttpError } from './http.ts';
 import { MixRequest, MixResponse, VerdictRequest, VerdictResponse } from './schema.ts';
+import { loadShare, saveShare, shareConfigured } from './share.ts';
 
 const MODEL = 'claude-opus-5-5';
 const MAX_BODY = 64 * 1024;
-const RATE_LIMIT = { requests: 10, windowMs: 10 * 60 * 1000 };
+const WINDOW_MS = 10 * 60 * 1000;
 
 const VERDICT_SYSTEM = `Ты — остроумный музыкальный критик в приложении Taste Clash, которое сравнивает вкусы двух людей.
 Тебе дают JSON-сводку: балл совместимости, жанровые доли, эпохи, привычки и список треков-кандидатов.
@@ -36,14 +38,6 @@ const MIX_SYSTEM = `Ты — диджей, который собирает ко�
 
 // ---------- Инфраструктура ----------
 
-class HttpError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
 const NOT_CONFIGURED = 'ИИ не настроен: задайте ANTHROPIC_API_KEY на сервере';
 
 // Ключ берётся из окружения (ANTHROPIC_API_KEY) или профиля `ant auth login`.
@@ -64,16 +58,25 @@ function aiConfigured(): boolean {
   );
 }
 
-/** Простое ограничение частоты по IP: сервис тратит деньги владельца ключа. */
-const hits = new Map<string, number[]>();
-function checkRate(ip: string) {
-  const now = Date.now();
-  const recent = (hits.get(ip) ?? []).filter((t) => now - t < RATE_LIMIT.windowMs);
-  if (recent.length >= RATE_LIMIT.requests) {
-    throw new HttpError(429, 'Слишком много запросов к ИИ — попробуйте через несколько минут');
-  }
-  recent.push(now);
-  hits.set(ip, recent);
+/** Простое ограничение частоты по IP: ИИ тратит деньги владельца ключа, хранилище — место. */
+function rateLimit(requests: number, message: string) {
+  const hits = new Map<string, number[]>();
+  return (ip: string) => {
+    const now = Date.now();
+    const recent = (hits.get(ip) ?? []).filter((t) => now - t < WINDOW_MS);
+    if (recent.length >= requests) throw new HttpError(429, message);
+    recent.push(now);
+    hits.set(ip, recent);
+  };
+}
+const aiRate = rateLimit(10, 'Слишком много запросов к ИИ — попробуйте через несколько минут');
+const shareRate = rateLimit(30, 'Слишком много ссылок подряд — попробуйте через несколько минут');
+
+/** За прокси Vercel настоящий IP клиента — первый в X-Forwarded-For. */
+function clientIp(req: IncomingMessage): string {
+  const forwarded = process.env.VERCEL ? req.headers['x-forwarded-for'] : undefined;
+  const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(',')[0].trim();
+  return first || req.socket.remoteAddress || 'unknown';
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -129,9 +132,10 @@ async function mix(body: unknown): Promise<MixResponse> {
   return { ...out, tracks: tracks.slice(0, input.length) };
 }
 
-const ROUTES: Record<string, (body: unknown) => Promise<unknown>> = {
-  '/api/verdict': verdict,
-  '/api/mix': mix,
+const ROUTES: Record<string, { run: (body: unknown) => Promise<unknown>; limit: (ip: string) => void }> = {
+  '/api/verdict': { run: verdict, limit: aiRate },
+  '/api/mix': { run: mix, limit: aiRate },
+  '/api/share': { run: saveShare, limit: shareRate },
 };
 
 function send(res: ServerResponse, status: number, data: unknown) {
@@ -141,23 +145,28 @@ function send(res: ServerResponse, status: number, data: unknown) {
 
 /** Возвращает true, если запрос был к API и уже обработан. */
 export async function handleApi(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-  const path = (req.url ?? '').split('?')[0];
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const path = url.pathname;
   if (path === '/api/status' && req.method === 'GET') {
-    send(res, 200, { ai: aiConfigured() });
+    send(res, 200, { ai: aiConfigured(), share: shareConfigured() });
     return true;
   }
   const route = ROUTES[path];
   if (!route) return false;
-  if (req.method !== 'POST') {
-    send(res, 405, { error: 'Только POST' });
-    return true;
-  }
   try {
-    checkRate(req.socket.remoteAddress ?? 'unknown');
-    send(res, 200, await route(await readJson(req)));
+    if (path === '/api/share' && req.method === 'GET') {
+      send(res, 200, await loadShare(url.searchParams.get('id') ?? ''));
+      return true;
+    }
+    if (req.method !== 'POST') {
+      send(res, 405, { error: 'Только POST' });
+      return true;
+    }
+    route.limit(clientIp(req));
+    send(res, 200, await route.run(await readJson(req)));
   } catch (e) {
     const [status, message] = describeError(e);
-    if (status >= 500) console.error(`[ai] ${path}:`, e);
+    if (status >= 500) console.error(`[api] ${path}:`, e);
     send(res, status, { error: message });
   }
   return true;
