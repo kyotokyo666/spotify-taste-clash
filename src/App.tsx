@@ -4,13 +4,15 @@ import { Results } from './components/Results';
 import { decodeProfile } from './lib/codec';
 import { compareProfiles } from './lib/compare';
 import { demoProfiles } from './lib/demo';
-import { resolveCode } from './lib/links';
+import { fetchReplies, isShortId, markRepliesSeen, resolveCode, sendReply, type Reply } from './lib/links';
 import { completeLogin, fetchProfile, startLogin } from './lib/spotify';
 import {
   loadMe,
+  loadPendingReply,
   loadPendingSlot,
   loadSlots,
   saveMe,
+  savePendingReply,
   savePendingSlot,
   saveSlots,
   type Slots,
@@ -56,6 +58,13 @@ async function bootstrap(): Promise<BootResult> {
       const me = loadMe();
       result = { slots: { a, b: me }, persist: true, results: Boolean(me) };
       saveSlots(result.slots!);
+      // Ответ возможен только на короткое приглашение: оно хранится на сервере.
+      // Свою же ссылку, открытую для проверки, ответом не считаем.
+      const own = me && me.createdAt === a.createdAt && me.name === a.name;
+      if (isShortId(invite!) && !own) {
+        if (me) await sendReply(invite!, me);
+        else savePendingReply({ id: invite!, name: a.name });
+      }
     }
 
     const token = await completeLogin();
@@ -66,6 +75,11 @@ async function bootstrap(): Promise<BootResult> {
       savePendingSlot(undefined);
       const next = { ...current, [slot]: profile };
       saveMe(profile);
+      const reply = loadPendingReply();
+      if (reply) {
+        savePendingReply(undefined);
+        await sendReply(reply.id, profile);
+      }
       result = { slots: next, persist: true, results: Boolean(next.a && next.b) };
     }
     return result;
@@ -79,6 +93,7 @@ export function App() {
   const [view, setView] = useState<'lobby' | 'results'>('lobby');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [replies, setReplies] = useState<Reply[]>([]);
 
   const setSlots = useCallback((next: Slots) => {
     setSlotsState(next);
@@ -101,6 +116,8 @@ export function App() {
         if (r.results) setView('results');
         if (r.error) setError(r.error);
         setBusy(null);
+        // Ответы друзей на приглашения, отправленные с этого устройства.
+        return fetchReplies().then((list) => !cancelled && setReplies(list));
       })
       .catch(() => undefined);
     return () => {
@@ -117,6 +134,25 @@ export function App() {
       savePendingSlot(undefined);
       setError(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  const openReply = async (r: Reply) => {
+    try {
+      // Сравниваем с тем слепком, который друг получил по ссылке, а если он истёк — с текущим.
+      const mine = await resolveCode(r.invite.id).then(decodeProfile, () => loadMe());
+      if (!mine) throw new Error('Ваш профиль из приглашения устарел — войдите заново');
+      markRepliesSeen(r.invite.id, r.index + 1);
+      setReplies((list) => list.filter((x) => x.invite.id !== r.invite.id || x.index > r.index));
+      setSlots({ a: mine, b: r.friend });
+      setView('results');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const dismissReply = (r: Reply) => {
+    markRepliesSeen(r.invite.id, r.index + 1);
+    setReplies((list) => list.filter((x) => x.key !== r.key));
   };
 
   const clash = useMemo(
@@ -148,6 +184,10 @@ export function App() {
       ) : (
         <Lobby
           slots={slots}
+          replies={replies}
+          replyTo={loadPendingReply()?.name}
+          onOpenReply={openReply}
+          onDismissReply={dismissReply}
           onConnect={connect}
           onSet={(slot, p) => setSlots({ ...slots, [slot]: p })}
           onCompare={() => setView('results')}

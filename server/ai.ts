@@ -10,7 +10,7 @@ import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import type { z } from 'zod';
 import { HttpError } from './http.ts';
 import { MixRequest, MixResponse, VerdictRequest, VerdictResponse } from './schema.ts';
-import { loadShare, saveShare, shareConfigured } from './share.ts';
+import { loadReplies, loadShare, saveReply, saveShare, shareConfigured } from './share.ts';
 
 const MODEL = 'claude-opus-5-5';
 const MAX_BODY = 64 * 1024;
@@ -136,6 +136,7 @@ const ROUTES: Record<string, { run: (body: unknown) => Promise<unknown>; limit: 
   '/api/verdict': { run: verdict, limit: aiRate },
   '/api/mix': { run: mix, limit: aiRate },
   '/api/share': { run: saveShare, limit: shareRate },
+  '/api/reply': { run: saveReply, limit: shareRate },
 };
 
 function send(res: ServerResponse, status: number, data: unknown) {
@@ -156,6 +157,12 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
   try {
     if (path === '/api/share' && req.method === 'GET') {
       send(res, 200, await loadShare(url.searchParams.get('id') ?? ''));
+      return true;
+    }
+    if (path === '/api/reply' && req.method === 'GET') {
+      // Токен — в заголовке, а не в URL: адреса запросов оседают в логах хостинга.
+      const owner = req.headers['x-owner-token'];
+      send(res, 200, await loadReplies(url.searchParams.get('id') ?? '', typeof owner === 'string' ? owner : ''));
       return true;
     }
     if (req.method !== 'POST') {
