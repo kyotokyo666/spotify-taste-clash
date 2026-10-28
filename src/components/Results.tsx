@@ -271,7 +271,7 @@ export function Results({ a, b, clash, onBack }: Props) {
       </section>
 
       <div className="grid">
-        <Section title="ИИ-разбор" note="Claude смотрит на ваши различия и ищет компромисс" wide>
+        <Section title="ИИ-разбор" note="Gemini смотрит на ваши различия и ищет компромисс" wide>
           <AiPanel a={a} b={b} clash={clash} />
         </Section>
 

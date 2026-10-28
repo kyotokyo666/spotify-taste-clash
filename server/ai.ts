@@ -1,18 +1,14 @@
 // API Taste Clash. Работает как middleware Vite (dev), внутри server/index.ts (prod) и в функциях Vercel (api/).
-// Ключ Anthropic живёт только на сервере: браузер присылает обезличенную сводку различий.
+// Ключ Gemini API живёт только на сервере: браузер присылает обезличенную сводку различий.
 
-import { existsSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import Anthropic from '@anthropic-ai/sdk';
-import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
-import type { z } from 'zod';
+import { ApiError, FinishReason, GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { z } from 'zod';
 import { HttpError } from './http.ts';
 import { MixRequest, MixResponse, VerdictRequest, VerdictResponse } from './schema.ts';
 import { loadReplies, loadShare, saveReply, saveShare, shareConfigured } from './share.ts';
 
-const MODEL = 'claude-opus-5-5';
+const MODEL = 'gemini-3.8-flash';
 const MAX_BODY = 64 * 1024;
 const WINDOW_MS = 10 * 60 * 1000;
 
@@ -38,24 +34,22 @@ const MIX_SYSTEM = `Ты — диджей, который собирает ко�
 
 // ---------- Инфраструктура ----------
 
-const NOT_CONFIGURED = 'ИИ не настроен: задайте ANTHROPIC_API_KEY на сервере';
+const NOT_CONFIGURED = 'ИИ не настроен: задайте GEMINI_API_KEY на сервере';
 
-// Ключ берётся из окружения (ANTHROPIC_API_KEY) или профиля `ant auth login`.
-let client: Anthropic | undefined;
-function anthropic(): Anthropic {
-  client ??= new Anthropic();
+const apiKey = () => process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+const aiConfigured = () => Boolean(apiKey());
+
+let client: GoogleGenAI | undefined;
+function gemini(): GoogleGenAI {
+  client ??= new GoogleGenAI({ apiKey: apiKey() });
   return client;
 }
 
-/** SDK проверяет учётные данные только при запросе, поэтому для статуса смотрим их источники сами. */
-function aiConfigured(): boolean {
-  const env = process.env;
-  return Boolean(
-    env.ANTHROPIC_API_KEY ||
-      env.ANTHROPIC_AUTH_TOKEN ||
-      env.ANTHROPIC_PROFILE ||
-      existsSync(join(env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'anthropic')),
-  );
+/** Gemini понимает подмножество JSON Schema; служебное поле `$schema` в него не входит. */
+function responseSchema(schema: z.ZodType) {
+  const json: Record<string, unknown> = z.toJSONSchema(schema);
+  delete json.$schema;
+  return json;
 }
 
 /** Простое ограничение частоты по IP: ИИ тратит деньги владельца ключа, хранилище — место. */
@@ -96,20 +90,33 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 
 async function ask<S extends z.ZodType>(system: string, input: unknown, schema: S, effort: 'low' | 'medium'): Promise<z.infer<S>> {
   if (!aiConfigured()) throw new HttpError(503, NOT_CONFIGURED);
-  const response = await anthropic().beta.messages.parse({
+  const response = await gemini().models.generateContent({
     model: MODEL,
-    max_tokens: 16000,
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-    output_config: { effort, format: betaZodOutputFormat(schema) },
-    system,
-    messages: [{ role: 'user', content: JSON.stringify(input) }],
+    contents: JSON.stringify(input),
+    config: {
+      systemInstruction: system,
+      responseMimeType: 'application/json',
+      responseJsonSchema: responseSchema(schema),
+      maxOutputTokens: 16000,
+      thinkingConfig: { thinkingLevel: effort === 'low' ? ThinkingLevel.LOW : ThinkingLevel.MEDIUM },
+    },
   });
-  if (response.stop_reason === 'refusal') throw new HttpError(422, 'Модель отказалась отвечать на этот запрос');
-  if (response.stop_reason === 'max_tokens' || !response.parsed_output) {
-    throw new HttpError(502, 'Модель вернула неполный ответ — попробуйте ещё раз');
+  const refused = new HttpError(422, 'Модель отказалась отвечать на этот запрос');
+  const incomplete = new HttpError(502, 'Модель вернула неполный ответ — попробуйте ещё раз');
+  if (response.promptFeedback?.blockReason) throw refused;
+  const finish = response.candidates?.[0]?.finishReason;
+  if (finish === FinishReason.MAX_TOKENS) throw incomplete;
+  if (finish && finish !== FinishReason.STOP) throw refused;
+  // Схема в запросе — подсказка модели, а не гарантия: ответ всё равно проверяем сами.
+  let json: unknown;
+  try {
+    json = JSON.parse(response.text ?? '');
+  } catch {
+    throw incomplete;
   }
-  return response.parsed_output as z.infer<S>;
+  const parsed = schema.safeParse(json);
+  if (!parsed.success) throw incomplete;
+  return parsed.data as z.infer<S>;
 }
 
 // ---------- Эндпоинты ----------
@@ -182,9 +189,14 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
 function describeError(e: unknown): [number, string] {
   if (e instanceof HttpError) return [e.status, e.message];
   if (e instanceof Error && e.name === 'ZodError') return [400, 'Некорректные данные запроса'];
-  if (e instanceof Anthropic.AuthenticationError) return [503, 'ИИ не настроен: проверьте ANTHROPIC_API_KEY на сервере'];
-  if (e instanceof Anthropic.RateLimitError) return [429, 'ИИ сейчас перегружен — попробуйте чуть позже'];
-  if (e instanceof Anthropic.APIConnectionError) return [502, 'Не удалось связаться с ИИ'];
-  if (e instanceof Anthropic.APIError) return [502, `Ошибка ИИ (${e.status ?? 'нет статуса'})`];
+  if (e instanceof ApiError) {
+    // Неверный ключ Gemini отвечает 400 API_KEY_INVALID, а не 401.
+    if (e.status === 401 || e.status === 403 || /API_KEY_INVALID|API key not valid/i.test(e.message)) {
+      return [503, 'ИИ не настроен: проверьте GEMINI_API_KEY на сервере'];
+    }
+    if (e.status === 429) return [429, 'ИИ сейчас перегружен — попробуйте чуть позже'];
+    return [502, `Ошибка ИИ (${e.status})`];
+  }
+  if (e instanceof TypeError && /fetch/i.test(e.message)) return [502, 'Не удалось связаться с ИИ'];
   return [500, 'Внутренняя ошибка'];
 }
