@@ -92,7 +92,7 @@ function SlotCard({ slot, profile, ...p }: { slot: Slot; profile?: Profile } & O
             className="btn spotify"
             onClick={() => p.onConnect(slot)}
             disabled={!CLIENT_ID}
-            title={CLIENT_ID ? undefined : 'Задайте VITE_SPOTIFY_CLIENT_ID в .env.local'}
+            title={CLIENT_ID ? undefined : 'Задайте SPOTIFY_CLIENT_ID в .env.local'}
           >
             Войти через Spotify
           </button>
@@ -155,7 +155,7 @@ export function Lobby({ slots, onCompare, onDemo, ...rest }: Props) {
 
       {!CLIENT_ID && (
         <p className="notice">
-          Вход через Spotify не настроен: создайте приложение в Spotify Developer Dashboard и пропишите <code>VITE_SPOTIFY_CLIENT_ID</code> в{' '}
+          Вход через Spotify не настроен: создайте приложение в Spotify Developer Dashboard и пропишите <code>SPOTIFY_CLIENT_ID</code> в{' '}
           <code>.env.local</code>. Демо и коды друзей работают и без этого.
         </p>
       )}

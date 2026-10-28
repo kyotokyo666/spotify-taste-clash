@@ -10,10 +10,10 @@ const API = 'https://api.spotify.com/v1';
 const SCOPES = 'user-top-read';
 const PKCE_KEY = 'tasteclash.pkce';
 
-export const CLIENT_ID: string = import.meta.env.VITE_SPOTIFY_CLIENT_ID ?? '';
+export const CLIENT_ID: string = import.meta.env.SPOTIFY_CLIENT_ID ?? '';
 
 export function redirectUri(): string {
-  return import.meta.env.VITE_SPOTIFY_REDIRECT_URI || window.location.origin + import.meta.env.BASE_URL;
+  return import.meta.env.SPOTIFY_REDIRECT_URI || window.location.origin + import.meta.env.BASE_URL;
 }
 
 function base64url(bytes: Uint8Array): string {
@@ -32,7 +32,7 @@ async function sha256(input: string): Promise<Uint8Array> {
 
 /** Уводит браузер на страницу входа Spotify. */
 export async function startLogin(): Promise<void> {
-  if (!CLIENT_ID) throw new Error('Не задан VITE_SPOTIFY_CLIENT_ID (см. .env.example)');
+  if (!CLIENT_ID) throw new Error('Не задан SPOTIFY_CLIENT_ID (см. .env.example)');
   const verifier = randomString(64);
   const state = randomString(16);
   sessionStorage.setItem(PKCE_KEY, JSON.stringify({ verifier, state }));
