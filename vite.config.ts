@@ -23,7 +23,7 @@ function aiApi(): Plugin {
 export default defineConfig(({ mode }) => {
   // Серверные переменные в бандл не попадают — только в process.env.
   const env = loadEnv(mode, process.cwd(), '');
-  if (env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_API_KEY) process.env.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
+  if (env.GEMINI_API_KEY && !process.env.GEMINI_API_KEY) process.env.GEMINI_API_KEY = env.GEMINI_API_KEY;
   // В браузер пробрасываем поимённо, а не через envPrefix: иначе в бандл утечёт любой SPOTIFY_*,
   // например случайно добавленный SPOTIFY_CLIENT_SECRET. Client ID при PKCE публичен.
   const exposed = (name: string) => JSON.stringify(process.env[name] ?? env[name] ?? '');

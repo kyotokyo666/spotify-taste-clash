@@ -81,8 +81,8 @@ export function AiPanel({ a, b, clash }: Props) {
   if (available === false) {
     return (
       <p className="muted">
-        ИИ-вердикт и микс-плейлист работают через сервер с ключом Claude API. Запустите приложение через{' '}
-        <code>npm run dev</code> или <code>npm start</code> и задайте <code>ANTHROPIC_API_KEY</code> в <code>.env.local</code>.
+        ИИ-вердикт и микс-плейлист работают через сервер с ключом Gemini API. Запустите приложение через{' '}
+        <code>npm run dev</code> или <code>npm start</code> и задайте <code>GEMINI_API_KEY</code> в <code>.env.local</code>.
       </p>
     );
   }
@@ -104,7 +104,7 @@ export function AiPanel({ a, b, clash }: Props) {
   return (
     <div className="ai">
       <p className="muted small privacy">
-        В Claude уходят только названия треков и исполнителей и статистика различий — без ваших имён и аккаунтов.
+        В Gemini уходят только названия треков и исполнителей и статистика различий — без ваших имён и аккаунтов.
       </p>
 
       <div className="ai-block">
